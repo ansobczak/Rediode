@@ -1,0 +1,485 @@
+PREREQUISITIES
+
+set i2c on Rpi by editing:  sudo nano /boot/config.txt 
+
+check lines
+dtparam=i2c_arm=on
+dtparam=i2c_arm_baudrate=50000
+dtparam=i2c_arm_baudrate=100000
+dtparam=i2c_arm_baudrate=400000  #wybrać jedną z tych prędkości 
+
+[pi4]
+# Enable DRM VC4 V3D driver on top of the dispmanx display stack
+#dtoverlay=vc4-fkms-v3d <<<<<<<<<<<<<<<<<<<<<
+#max_framebuffers=2     <<<<<<<<<<<<<<<<<<<<<<
+
+dtparam=i2c_arm=on
+dtoverlay=i2c1
+dtoverlay=i2c3
+dtoverlay=i2c4
+dtoverlay=i2c5
+dtoverlay=i2c6
+
+
+na Pi0 działało to, jako i2c3, jako soft i2c i trzeba użyć pull up 10kohm do 3v3 
+
+[Pi0]
+dtparam=i2c_arm=on
+#dtparam=i2c_arm_baudrate=5000
+#dtparam=i2c_arm_baudrate=100000
+dtparam=i2c_arm_baudrate=400000
+dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=22,i2c_gpio_scl=23,i2c_gpio_delay_us=2
+
+##################
+
+sudo apt-get install -y i2c-tools
+pip3 install smbus
+pip3 install paho-mqtt
+
+apt-cache search mosquitto
+sudo apt-get install mosquitto
+sudo apt-get install mosquitto-clients
+
+konfiguracja mosquitto:
+https://mosquitto.org/man/mosquitto-8.html
+https://mosquitto.org/man/mosquitto_passwd-1.html
+
+######################
+~ $ cat /etc/mosquitto/mosquitto.conf
+
+
+
+               # Place your local configuration in /etc/mosquitto/conf.d/
+               #
+               # A full description of the configuration file is at
+               # /usr/share/doc/mosquitto/examples/mosquitto.conf.example
+
+               pid_file /run/mosquitto/mosquitto.pid
+               sys_interval = 15
+
+               persistence true
+               persistence_location /var/lib/mosquitto/
+
+               log_dest file /var/log/mosquitto/mosquitto.log
+
+               include_dir /etc/mosquitto/conf.d
+
+######################
+
+ustawić hasła dla mtqq:
+cd /etc/mosquitto/conf.d
+
+powinien być plik mosq.pss
+
+Jesli pliku nie ma to utworzyć:
+    mosquitto_passwd  -c  mosq.pss rediode
+dla username="rediode",password="rediode"
+dodać dla telefonu 
+   mosquitto_passwd  -b  mosq.pss andro1 andro_mosq1
+
+dodać dla sun_set_rise: 
+   mosquitto_passwd  -b  mosq.pss sun_set sun_set_rise
+   
+dodać dla arduino_nano/esp: 
+   mosquitto_passwd  -b  mosq.pss arduino_1 arduino_nan01
+
+dodać dla Tasmota
+   mosquitto_passwd  -b  mosq.pss Tasmota01 Tasmota_mosq01
+Client: Tasmota_gniazdko01
+Topic: tasmota_gniazdko01
+Full topic: %prefix%/%topic%/
+
+!!!! Po dodaniu uzytkownika zrestartuj MQTT sudo service mosquitto restart
+
+mosquitto na telefonie: Zero
+tcp://100.96.1.4:1883
+id clienta andro1
+pass: andro_mosq1
+
+moaquito wewnątrz domu.
+tcp://192.168.88.51
+
+topic:
+red 
+red/buttons 
+red/temp/ 
+red/humi 
+red/hardbit 
+/red/sun 
+red/system 
+red/monitor
+
+
+checking:
+sudo service mosquitto status
+sudo service openvpn status
+
+
+logs and cron
+pwd
+/home/pi
+
+
+########
+cat reddiode_ch.sh
+##########
+
+#cat reddiode_ch.sh
+#script checks if RedDiode is working
+#restarting if required
+#log action in file /home/pi/reddiode_ch.log
+
+
+_PyPr=`ps -A | grep "pyth"`
+
+
+if [[ -z "$_PyPr" ]]; 
+then
+	cd /home/pi/Python
+        python3 /home/pi/Python/red_diode_main.py $((1*60*0)) 0.05 &
+        echo `date` ${_PyPr%% *} "reddiode_ch restart RedDiode" >> /home/pi/reddiode_ch.log
+else
+        echo `date` ${_PyPr%% *} "reddiode_ch run OK" >> /home/pi/reddiode_ch.log ;
+fi
+
+
+#########
+cat vpn_ch.sh
+########
+
+#script checks if vpn is working
+#restarting if required
+#log action in file /home/pi/vpn_ch.log
+
+
+_vpn="100.96"
+
+_IPa=$(hostname -I | awk 'r=/100.96./ {print $2}')
+_IP=$(hostname -I | awk 'r=/100.96./ {print $2}' | awk -F. ' {print $1"."$2}')
+
+#echo "$_IP" $_IP "$_vpn" $_vpn
+
+if [[ $_IP = $_vpn ]]; 
+then 
+        echo `date` "$_IPa" "vpn_ch run OK" >> /home/pi/vpn_ch.log ; 
+else 
+        sudo openvpn --auth-nocache --config /home/pi/openVPN/openVPN.ovpn --daemon & 
+        echo `date`  "vpn_ch restart vpn" >> /home/pi/vpn_ch.log 
+fi
+
+#########
+cat log_clean.sh
+#########
+
+#script to copy logs into backup files
+#and remove the original log file
+#Purpose: save disk space for endless logs
+
+for f in `ls -f /home/pi/*ch.log`; do  #this part counts restarts in every log and add this info to /home/pi/crontab_ch.log
+   st=`head -n 1 $f`
+   st=${st%,*}; st=${st##*,};  
+   en=`tail -n 1 $f`
+   en=${en%,*}; en=${en##*,};
+   cn=`awk '!/OK/ {print }' $f | wc -l`
+   echo -e "$f \nod ${st%,*} do ${en%,*} restarted $cn \n" >> /home/pi/crontab_ch.log
+   done
+
+ls -f /home/pi/*ch.log | xargs -t -Ifn cp fn fn_0
+ls -f /home/pi/*ch.log | xargs -t -Ifn rm fn 
+
+
+
+
+
+
+
+############
+sudo crontab -l
+###########
+
+
+# Edit this file to introduce tasks to be run by cron.
+# 
+# Each task to run has to be defined through a single line
+# indicating with different fields when the task will be run
+# and what command to run for the task
+# 
+# To define the time you can provide concrete values for
+# minute (m), hour (h), day of month (dom), month (mon),
+# and day of week (dow) or use '*' in these fields (for 'any').
+# 
+# Notice that tasks will be started based on the cron's system
+# daemon's notion of time and timezones.
+# 
+# Output of the crontab jobs (including errors) is sent through
+# email to the user the crontab file belongs to (unless redirected).
+# 
+# For example, you can run a backup of all your user accounts
+# at 5 a.m every week with:
+# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/
+# 
+# For more information see the manual pages of crontab(5) and cron(8)
+# 
+# m h  dom mon dow   command
+#
+#             every 20 min: check if VPN is working
+*/20 * * * * bash /home/pi/vpn_ch.sh >> /home/pi/crontab_ch.log 
+
+
+#             every 2 min: check if RedDiode is working
+*/2 * * * * sudo -u pi bash /home/pi/reddiode_ch.sh >> /home/pi/reddiode_run.log
+# aby nigdzie nie zapisywal  > /dev/null 2>&1
+
+#             clean up logs every month
+0 2 24 * * bash /home/pi/log_clean.sh >> /home/pi/crontab_ch.log 
+#
+#    TEST
+#* * * * * bash /home/pi/test.sh > /dev/null 2>&1
+#*/1 * * * * sudo -u pi bash /home/pi/Python/py_test.sh >> /home/pi/Python/crontab_test_ch.log &
+#
+#  this is a cron log file: /home/pi/crontab_ch.log 
+
+
+
+
+
+
+
+
+
+CONFIG FILE.
+
+# locate in /home/pi/Python/red_diode.cfg
+# highlighting mode: ctr-shift-h: .ini
+# or change location in red_diode_procedures.py 
+
+open RPi terminal and run: 
+i2cdetect -l
+this wll show existing i2c buses. There should be at least:
+
+i2c-1	i2c       	bcm2835 (i2c@7e804000)          	I2C adapter
+i2c-2	i2c       	bcm2835 (i2c@7e805000)          	I2C adapter
+
+!!!!!!!!! NEVER USE i2c-2 !!!!!!!!!!!!!!!
+
+for pi ZERO it is possible to set up software i2c bus - this can work for additional sensors or devices. 
+
+i2c-3	i2c       	3.i2c                           	I2C adapter
+
+
+i2cdetect -y 1
+
+the output looks like this:
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- 21 -- -- -- -- 26 27 -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --
+
+Connected chips have adreses 0x21, 0x26 and 0x27
+open config file and edit chip section:
+
+
+MCP = MCP-01  1 0x26 
+      MCP-02  1 0x27  
+      MCP-03  1 0x21 
+
+save the file
+
+
+go to /home/pi/Python, run python3 and the following
+
+import Red_diode_setup as rd
+rd.Out_map()
+rd.In_map()
+
+or manually 
+
+from red_diode_config_procedures import all_off, close_config_file, In_map, open_config_file, Out_map, read_config, \
+      read_config_inputs, read_config_MCP23017, read_config_mqtt, read_config_relays, \
+      read_config_ServoPWM, read_config_temp_hum_sensors, read_config_tempsensors, read_config_vbutt, read_dimming, \
+      read_i2c, read_time_after_move, re_read_config, r, tog, all_stop
+
+#If no errors run:
+
+CfFile = '/home/pi/Python/red_diode.cfg'
+cfg_file, confign_str=open_config_file(CfFile)
+read_i2c(confign_str)
+read_config_MCP23017(confign_str)
+
+Out_map()
+
+
+
+Out_map mapping the outputs. 
+program runs all MCP chips GPIO and test connected relays. 
+when started you will smth like this: chip MCP-01 pin 0 enter relay number and name: 
+No relay connected, just press ENTER
+If relay is connected, it will be turned ON, and you can provide the output name, and press enter.
+When finished, programs prints set of records thet can be copied to the config file. It should look like this:
+
+"add the below to 'red_diode.cfg' file under 'Pins_relay=' section and add human readable names
+MCP-01 8 out8 
+MCP-01 9 out7 
+MCP-01 10 out6 
+MCP-01 11 out5 
+MCP-01 12 out4 
+MCP-01 13 out3 
+MCP-01 14 out2 
+"
+You can add it to the red_diode.cfg after 'Pins_relay=' section. (see exaples below). 
+
+Now is time to run next utility, but before you do it open all contactrons and switch off motion detectors. If so run
+
+In_map()
+
+In_map check the inputs. It wait for you to press button or close contactron. When you press button/swith/input or close contactron, program will prompt you to enter the name and press enter. When finishe type 'END' (upercase!!!!) and close any switch or contactron. PRogram will print the results in two sets. One look like this:
+
+'add the below to 'red_diode.cfg' file under 'butt= ' section and add related outputs human readable names
+
+swith1 MCP-02 3  
+swithc1 MCP-02 2  
+swithy4 MCP-02 6  
+swithy3 MCP-02 5  
+Contactron2 MCP-02 4  
+'
+
+You can add it to the red_diode.cfg under 'butt= ' section. You have to add outputs to the lines, to define link between input and output. See examples below.
+
+Second set lookls like this:
+ 
+add the below to 'red_diode.cfg' file under 'sequence= ' section and add sequence
+swith1
+swithc1
+swithy4 
+swithy3 
+Contactron2
+'
+
+Again you can add it to the red_diode.cfg under 'sequence= '. You will have to add the sequence symbols at the end of each line, to define what the input is doing. See examples below. 
+
+
+
+
+CONFIG FILE EXAMPLE
+
+[Chips]
+
+# MCP is MCP27017 configuration
+# MPC pins in Red Diode are numbered 0-15,
+# in Chips section, chips human readable names and i2c adreses are defined.
+
+
+#  chip-name | bus-number | adres-on-bus 
+MCP = c_B1_20  1 0x20 
+      c_B1_21  1 0x21 
+      c_B1_22  1 0x22 
+      c_B1_23  1 0x23 
+      c_B1_24  1 0x24 
+      c_B1_25  1 0x25 
+      c_B1_26  1 0x26 
+      c_B1_27  1 0x27  
+      
+      
+      
+[Relay]
+# Relay connections to MCP27017 GPIOs  
+# define what outputs are conected to relay and GPIO's
+# outputs are MCP GPIOs numbered 0-15 
+# MCP can not directly control 220-230V outputs. MCP can control relays. 230V receivers are connected to relay. See hardware description. 
+# This section describes how relays and MCP chips are connected. This is required to translate MCP GPIO numbers intu receiver human readable names. 
+
+# chip_name | GPIO_pin | relay_no | output_name | optional: PWM - dimming Mark (PWM) |  optional REV (reverse logic for fail-safe operation)
+
+Pins_relay= c_B1_22	7	A01 kuch1
+            c_B1_26	0	A02 kuch2
+            c_B1_22	6	A03 kuch3
+            c_B1_26	1	A04 pokA1
+            c_B1_20	4	A05 pokA2
+            c_B1_20	7	A06 pokA3
+            c_B1_20	3	A07 pokB1
+            c_B1_20	6	A08 pokB2
+            c_B1_25	1	A09 pokB3
+            c_B1_23	6	A10 pokC1
+            c_B1_25	0	A11 pokC2
+            c_B1_23	7	A12 pokC3
+            c_B1_24	0	A13 zew1 REV
+            c_B1_27	2	A14 zew2 REV
+            c_B1_24	1	A15 stojaca1  
+            c_B1_27	1	A16 stojaca2 PWM  
+            c_B1_26  6  B08 magic
+             
+             
+[Buttons]
+# inputs definitions.
+# inputs like buttons, contactrons, motion detection. Inputs are connected to MCP GPIOs, can be 0-15 on each chip.
+# 
+
+# button:  input_name | chip_name | GPIO_pin  | output list (comma separated, no spaces: out1,ou2,out3)  | optional_contactron (CON)| optional motion detection (MOV)
+
+butt= but1 c_B1_21 15 kuch1,kuch2,kuch3,pokA1,pokA2,pokA3
+      but2 c_B1_21 14 kuch1,kuch2,kuch3,pokA1,pokA2,pokA3
+      but3 c_B1_21 13 kuch1,kuch2,kuch3,pokA1,pokA2,pokA3
+      but4 c_B1_21 12 pokB1,pokB2,pokB3
+      but5 c_B1_21 11 pokC1,pokC2,pokC3 
+      but6 c_B1_21 10 zew1,zew2
+      but7 c_B1_21 9  stojaca1 
+      but8 c_B1_21 8 zew2
+      but9 c_B1_23 15 stojaca2
+      but10 c_B1_23 14 kuch1,kuch2,kuch3,pokA1,pokA2,pokA3,pokB1,pokB2,pokB3,pokC1,pokC2,pokC3,zew1,zew2,stojaca1,stojaca2
+      okno1 c_B1_23 13 stojaca1,CON
+      pok1mv c_B1_22 15 magic,MOV
+     
+      
+      
+#depending on the cycle/change version picking the way binary status is changed 
+#s1: seq 1 100 010 001 000 cycle
+#s2: seq 2 100 010 110 001 101 011 111 000 cycle
+#s3: seq 3 100 110 111 000 cycle
+#s4: seq 4 all on/off - if at least one is on all will be off first, than next push will on all 
+#s5: seq 5 all off
+#s6: seq 6 all on
+#s7: seq 7 do nothing
+#    for contactron use s5 s6
+#v1 - v_pres - need parameters list to passed when calling [action, outputs]
+#definig the way buttons are working:
+#
+# button name | fisrt_sequence  | second_sequence
+sequence=   but1  s4 s1 
+            but2  s4 s2
+            but3  s4 s3 
+            but4  s4 s5 
+            but5  s4 s5 
+            but6  s4 s5 
+            but7  s4 s5  
+            but8  s4 s5 
+            but9  s4 s5  
+            but10 s4 s5  
+            okno1 s5 s6
+            pok1mv v1 v1
+      
+# virtual buttons. V_BUTTONS are available trough MTQQ (publish topic 'red' and payload v-butt name example 'night_on'
+# v_button:name, procedure, optional parameters for procedure
+# parameters for procedure v_press: 1st par: on, off , togle. following parameters are outputs name's
+vbutt= alloff all_off
+   night_on v_pres on zew1 zew2
+   night_off v_pres off zew1 zew2
+   ruch v_pres togle zew1 zew2
+   
+[Sensors]
+# possible to match temperature 1-wire sensors with name
+# however, without this temperature will be still provided but without name
+# details of file location - should be standard for Rpi
+
+temp_path=/sys/bus/w1/devices/
+temp_file=temperature
+
+#        sensor code      | name
+termo=  28-01187712feff  Pokoj1
+         28-00000c1b321a  Pokoj2
+
+
